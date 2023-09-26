@@ -8,7 +8,7 @@
 
 
 import os,sys,time
-os.environ["PYOPENGL_PLATFORM"] = "egl"
+# os.environ["PYOPENGL_PLATFORM"] = "egl"
 code_path = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(code_path)
 import open3d as o3d

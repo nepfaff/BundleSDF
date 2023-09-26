@@ -1373,6 +1373,7 @@ class NerfRunner:
     logging.info(f'query_pts:{query_pts.shape}, valid:{valid.sum()}')
     flat = query_pts[valid]
 
+    # Sigma is the signed distance output from the geometric network
     sigma = []
     chunk = self.cfg['netchunk']
     for i in range(0,flat.shape[0],chunk):

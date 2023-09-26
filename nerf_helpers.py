@@ -247,7 +247,7 @@ class NeRFSmall(nn.Module):
         self.input_ch = input_ch
         self.input_ch_views = input_ch_views
 
-        # sigma network
+        # sigma network (geometric signed distance function)
         self.num_layers = num_layers
         self.hidden_dim = hidden_dim
         self.geo_feat_dim = geo_feat_dim
@@ -271,7 +271,7 @@ class NeRFSmall(nn.Module):
         self.sigma_net = nn.Sequential(*sigma_net)
         torch.nn.init.constant_(self.sigma_net[-1].bias, 0.1)     # Encourage last layer predict positive SDF
 
-        # color network
+        # color network (appearance function)
         self.num_layers_color = num_layers_color
         self.hidden_dim_color = hidden_dim_color
 
