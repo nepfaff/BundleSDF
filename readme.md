@@ -70,6 +70,12 @@ Due to license issues, we are not able to include [XMem](https://github.com/hkch
 ```
 # Run joint tracking and reconstruction
 python run_custom.py --mode run_video --video_dir /home/bowen/debug/2022-11-18-15-10-24_milk --out_folder /home/bowen/debug/bundlesdf_2022-11-18-15-10-24_milk --use_segmenter 1 --use_gui 1 --debug_level 2
+
+# 2) Run global refinement post-processing to refine the mesh
+python run_custom.py --mode global_refine --video_dir /home/bowen/debug/2022-11-18-15-10-24_milk --out_folder /home/bowen/debug/bundlesdf_2022-11-18-15-10-24_milk   # Change the path to your video_directory
+
+# 3) (Optional) If you want to draw the oriented bounding box to visualize the pose, similar to our demo
+python run_custom.py --mode draw_pose --out_folder /home/bowen/debug/bundlesdf_2022-11-18-15-10-24_milk
 ```
 - **NOTE:** Both `--mode global_refine` and `--mode get_mesh` are depreciated. The `--mode run_video` already completes the original function of these two and outputs a scales and textured mesh.
 
