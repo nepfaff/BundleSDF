@@ -52,6 +52,9 @@ cd docker && bash run_container.sh
 
 # Inside docker container, compile the packages which are machine dependent
 bash build.sh
+
+# Run the following to prevent `version GLIBCXX_3.4.29 not found` error
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/conda/envs/py38/lib/
 ```
 
 # Run on your custom data
