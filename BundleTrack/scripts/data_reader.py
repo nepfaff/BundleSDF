@@ -15,7 +15,7 @@ code_dir = os.path.dirname(os.path.realpath(__file__))
 sys.path.append(f'{code_dir}/../../')
 from Utils import *
 
-HO3D_ROOT = '/mnt/9a72c439-d0a7-45e8-8d20-d7a235d02763/DATASET/HO3D_v3'
+HO3D_ROOT = 'data/HO3D_v3'
 
 
 class YcbineoatReader:
