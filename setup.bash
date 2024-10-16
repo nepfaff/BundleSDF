@@ -224,7 +224,7 @@ cmake .. -DBUILD_TESTING=OFF \
 make -j$(nproc)
 make install
 
-Clone and build Kaolin
+# Clone and build Kaolin
 cd $INSTALL_PREFIX
 git clone --recursive https://github.com/NVIDIAGameWorks/kaolin
 
