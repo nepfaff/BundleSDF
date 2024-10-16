@@ -8,6 +8,7 @@ export TZ=US/Pacific
 
 # Set installation prefix
 INSTALL_PREFIX=$(pwd)/local
+rm -rf $INSTALL_PREFIX
 mkdir -p $INSTALL_PREFIX
 
 # Update package lists
