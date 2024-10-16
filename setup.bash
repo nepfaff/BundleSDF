@@ -248,7 +248,7 @@ pip install transformations einops scikit-image awscli-plugin-endpoint gputil xa
 ROOT=$(pwd)
 cd ${INSTALL_PREFIX}/kaolin && pip install -e .
 cd ${ROOT}/mycuda && rm -rf build *egg* && pip install -e .
-cd ${ROOT}/BundleTrack && rm -rf build && mkdir build && cd build && cmake .. && make -j11
+cd ${ROOT}/BundleTrack && rm -rf build && mkdir build && cd build && cmake .. && make -j$(nproc)
 
 # Do later to prevent errors from dependencies.
 pip install --upgrade networkx
