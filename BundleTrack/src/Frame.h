@@ -86,7 +86,7 @@ public:
 class FramePtrComparator
 {
 public:
-  bool operator () (const std::shared_ptr<Frame> &f1, const std::shared_ptr<Frame> &f2)
+  bool operator () (const std::shared_ptr<Frame> &f1, const std::shared_ptr<Frame> &f2) const
   {
     if (f1->_id < f2->_id) return true;
     return false;

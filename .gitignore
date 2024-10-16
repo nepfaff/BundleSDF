@@ -141,3 +141,5 @@ data/
 logs/
 !BundleTrack/XMem/inference/data
 run_used.yml
+local
+test

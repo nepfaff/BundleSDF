@@ -21,7 +21,7 @@
     "sacred/": true,
     "wandb/": true
   },
-  "explorer.excludeGitIgnore": true,
+  "explorer.excludeGitIgnore": false,
   "files.associations": {
     "*.cu": "cpp",
     "*.cuh": "cpp",

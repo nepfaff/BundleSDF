@@ -1072,6 +1072,7 @@ class NerfRunner:
       invalid_depth_mask = valid_depth_mask==0
 
       if invalid_depth_mask.any() and self.cfg['use_octree']:
+        invalid_depth_mask = invalid_depth_mask.to(ray_ids.device)
         z_vals_invalid,_ = self.sample_rays_uniform_occupied_voxels(ray_ids=ray_ids[invalid_depth_mask],rays_d=viewdirs[invalid_depth_mask],depths_in_out=depths_in_out[invalid_depth_mask],lindisp=lindisp,perturb=perturb, depths=None, N_samples=self.cfg['N_samples_around_depth'])
         z_vals_around_depth[invalid_depth_mask] = z_vals_invalid
       else:

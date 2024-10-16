@@ -186,6 +186,8 @@ public:
 #if TIMER
     cudaDeviceSynchronize();
     return std::chrono::duration_cast<second_>(clock_::now() - beg_).count();
+#else
+    return 0.0;  // Default return value when TIMER is not defined
 #endif
   }
   void print(std::string message = "")

@@ -6,20 +6,20 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
-
 cmake_minimum_required(VERSION 3.15)
-project(BundleTrack LANGUAGES CUDA CXX)
+project(BundleTrack LANGUAGES C CUDA CXX)
 
 message("CMAKE_CXX_COMPILER_VERSION: ${CMAKE_CXX_COMPILER_VERSION}")
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_BUILD_TYPE Release)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++14 -g")
-# set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fPIC -gencode arch=compute_30,code=sm_30 -gencode arch=compute_75,code=sm_75 -O0 -G -g -std=c++14 -lineinfo -use_fast_math --default-stream per-thread")
-# set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fPIC -gencode arch=compute_30,code=sm_30 -gencode arch=compute_35,code=sm_35 -gencode arch=compute_75,code=sm_75 -O3 -std=c++14 -use_fast_math --default-stream per-thread")
-set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -dc -gencode=arch=compute_86,code=sm_86 -gencode=arch=compute_52,code=sm_52  -gencode=arch=compute_60,code=sm_60   -gencode=arch=compute_61,code=sm_61   -gencode=arch=compute_70,code=sm_70   -gencode=arch=compute_75,code=sm_75   -gencode=arch=compute_80,code=sm_80  -O3 -std=c++14 -use_fast_math --default-stream per-thread")
-# set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fPIC -gencode arch=compute_86,code=sm_86  -O0 -G -g -std=c++14 -use_fast_math --default-stream per-thread")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17 -g")
+# set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fPIC -gencode arch=compute_30,code=sm_30 -gencode arch=compute_75,code=sm_75 -O0 -G -g -std=c++17 -lineinfo -use_fast_math --default-stream per-thread")
+# set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler -fPIC -gencode arch=compute_30,code=sm_30 -gencode arch=compute_35,code=sm_35 -gencode arch=compute_75,code=sm_75 -O3 -std=c++17 -use_fast_math --default-stream per-thread")
+set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -dc -gencode=arch=compute_86,code=sm_86 -gencode=arch=compute_52,code=sm_52  -gencode=arch=compute_60,code=sm_60   -gencode=arch=compute_61,code=sm_61   -gencode=arch=compute_70,code=sm_70   -gencode=arch=compute_75,code=sm_75   -gencode=arch=compute_80,code=sm_80  -O3 -std=c++17 -use_fast_math --default-stream per-thread")
 
+# Set CUDA architectures to avoid warnings
+set(CMAKE_CUDA_ARCHITECTURES 52 60 61 70 75 80 86)
 
 # if (${CMAKE_BUILD_TYPE} STREQUAL "Release")
 #   set(COMPILE_OPTIONS "-fopenmp -march=native -msse -msse2 -msse3 -msse4 -msse4.2 -mavx2 -ftree-vectorize -O3")
@@ -48,10 +48,12 @@ find_package(OpenGL REQUIRED)
 find_package(CUDA REQUIRED)
 find_package(GLUT REQUIRED)
 find_package(LAPACK)
+find_package(GLEW REQUIRED)
+find_package(MPI REQUIRED COMPONENTS C CXX)
 
 find_package(pybind11 REQUIRED)
 find_package(Python COMPONENTS Interpreter Development REQUIRED)
-set(PYBIND11_CPP_STANDARD -std=c++14)
+set(PYBIND11_CPP_STANDARD -std=c++17)
 # set(PYBIND11_FINDPYTHON TRUE)
 
 include_directories(
@@ -67,6 +69,8 @@ include_directories(
   ${PCL_INCLUDE_DIRS}
   ${OPENGL_INCLUDE_DIR}
   ${CSPARSE_INCLUDE_DIR}
+  ${GLEW_INCLUDE_DIRS}
+  ${MPI_INCLUDE_PATH}
   ${PROJECT_SOURCE_DIR}/src/cuda/
   ${PROJECT_SOURCE_DIR}/src/cuda/Solver/
   ${PROJECT_SOURCE_DIR}/src/Thirdparty
@@ -87,9 +91,7 @@ file(GLOB Boost_LIBRARIES "/usr/lib/x86_64-linux-gnu/libboost*.so")
 message("G2O_LIBS " ${G2O_LIBS})
 message("Boost_LIBRARIES " ${Boost_LIBRARIES})
 
-set(YAML_CPP_LIBRARIES "/usr/local/lib/libyaml-cpp.so")
-
-
+# Use yaml-cpp library found by find_package
 list(REMOVE_ITEM PCL_LIBRARIES pcl_simulation)
 message("PCL_LIBRARIES " ${PCL_LIBRARIES})
 
@@ -101,7 +103,6 @@ file(GLOB CUDA_FILES
 )
 message("CUDA_FILES " ${CUDA_FILES})
 
-
 cuda_add_library(MY_CUDA_LIB SHARED ${CUDA_FILES})
 target_link_libraries(MY_CUDA_LIB ${CUDA_LIBRARIES})
 set_target_properties(MY_CUDA_LIB
@@ -111,10 +112,9 @@ set_target_properties(MY_CUDA_LIB
 )
 
 add_library(${PROJECT_NAME} SHARED ${MY_SRC})
-target_link_libraries(${PROJECT_NAME} ${Boost_LIBRARIES} ${OpenCV_LIBRARIES} ${PCL_LIBRARIES} ${OpenMP_CXX_FLAGS} ${OPENGL_LIBRARY}  ${YAML_CPP_LIBRARIES} ${CUDA_LIBRARIES} ${OPENGL_LIBRARIES} ${GLUT_LIBRARY}  zmq ${GUROBI_LIBS} ${PYTHON_LIBRARIES} ${G2O_LIBS} MY_CUDA_LIB
-)
+target_link_libraries(${PROJECT_NAME} ${Boost_LIBRARIES} ${OpenCV_LIBRARIES} ${PCL_LIBRARIES} ${OpenMP_CXX_FLAGS} ${OPENGL_LIBRARY} yaml-cpp ${CUDA_LIBRARIES} ${OPENGL_LIBRARIES} ${GLUT_LIBRARY} zmq ${GUROBI_LIBS} ${PYTHON_LIBRARIES} ${G2O_LIBS} MY_CUDA_LIB ${GLEW_LIBRARIES} ${MPI_C_LIBRARIES})
 
 ############# Pybind
 # pybind11_add_module(my_cpp pybind_interface/pybind_api.cpp ${MY_SRC})
 pybind11_add_module(my_cpp pybind_interface/pybind_api.cpp ${CMAKE_SOURCE_DIR}/src/Frame.cpp)
-target_link_libraries(my_cpp PRIVATE ${PROJECT_NAME} MY_CUDA_LIB ${YAML_CPP_LIBRARIES} ${PYTHON_LIBRARIES} ${CUDA_LIBRARIES})
+target_link_libraries(my_cpp PRIVATE ${PROJECT_NAME} MY_CUDA_LIB yaml-cpp ${PYTHON_LIBRARIES} ${CUDA_LIBRARIES})

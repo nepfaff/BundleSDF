@@ -38,6 +38,23 @@ year          = {2023},
     └── masks_XMem
   ```
 
+# Local setup without docker
+
+Note that this has only been tested on Ubuntu 22.04 with CUDA 12.1
+
+```
+bash setup.bash
+```
+
+Then activate the venv:
+```
+. .venv/bin/activate
+```
+
+Then run the code:
+```
+python run_custom.py --mode run_video --video_dir /home/bowen/debug/2022-11-18-15-10-24_milk --out_folder /home/bowen/debug/bundlesdf_2022-11-18-15-10-24_milk --use_segmenter 1 --use_gui 1 --debug_level 2
+```
 
 # Docker/Environment setup
 - Build the docker image (this only needs to do once and can take some time).
