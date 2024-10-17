@@ -6,6 +6,9 @@
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
 
+import matplotlib
+matplotlib.use('Agg')  # Use the Agg backend for non-GUI rendering
+import matplotlib.pyplot as plt
 
 from Utils import *
 from nerf_runner import *
@@ -699,7 +702,7 @@ class BundleSdf:
       self.cfg_nerf['sc_factor'] = float(tmp['sc_factor'])
       self.cfg_nerf['translation'] = np.array(tmp['translation'])
 
-    sc_factor,translation,pcd_real_scale, pcd_normalized = compute_scene_bounds(None,glcam_in_obs,self.K,use_mask=True,base_dir=self.cfg_nerf['save_dir'],rgbs=np.array(rgbs),depths=np.array(depths),masks=np.array(masks), cluster=True, eps=0.01, min_samples=5, sc_factor=self.cfg_nerf['sc_factor'], translation_cvcam=self.cfg_nerf['translation'])
+    sc_factor,translation,_, pcd_normalized = compute_scene_bounds(None,glcam_in_obs,self.K,use_mask=True,base_dir=self.cfg_nerf['save_dir'],rgbs=np.array(rgbs),depths=np.array(depths),masks=np.array(masks), cluster=True, eps=0.01, min_samples=5, sc_factor=self.cfg_nerf['sc_factor'], translation_cvcam=self.cfg_nerf['translation'])
 
     self.cfg_nerf['sc_factor'] = float(sc_factor)
     self.cfg_nerf['translation'] = translation
@@ -745,7 +748,11 @@ class BundleSdf:
     # mesh = trimesh.load(mesh_files[-1])
 
     mesh,sigma,query_pts = nerf.extract_mesh(voxel_size=self.cfg_nerf['mesh_resolution'],isolevel=0, return_sigma=True)
+
+    # Remove duplicate vertices that are very close to each other.
     mesh.merge_vertices()
+
+    # Remove floaters around the main mesh by selecting the largest connected component.
     ms = trimesh_split(mesh, min_edge=100)
     largest_size = 0
     largest = None
@@ -760,7 +767,9 @@ class BundleSdf:
     mesh.export(f'{self.debug_dir}/mesh_cleaned.obj')
 
     if get_texture:
-      mesh = nerf.mesh_texture_from_train_images(mesh, rgbs_raw=rgbs_raw, train_texture=False, tex_res=tex_res)
+      # mesh = nerf.mesh_texture_from_train_images(mesh, rgbs_raw=rgbs_raw, train_texture=False, tex_res=tex_res)
+      mesh = nerf.mesh_texture_from_train_images_with_interpolation(mesh, rgbs_raw=rgbs_raw, train_texture=False, tex_res=tex_res)
+      # mesh = nerf.mesh_texture_from_nerf(mesh, tex_res=tex_res)
 
     mesh = mesh_to_real_world(mesh, pose_offset=offset, translation=self.cfg_nerf['translation'], sc_factor=self.cfg_nerf['sc_factor'])
     mesh.export(f'{self.debug_dir}/textured_mesh.obj')

@@ -122,15 +122,15 @@ def run_one_video_global_nerf(out_folder='/home/bowen/debug/bundlesdf_scan_coffe
   yaml.dump(cfg_bundletrack, open(cfg_track_dir,'w'))
 
   cfg_nerf = yaml.load(open(f"{out_folder}/config_nerf.yml",'r'))
-  cfg_nerf['n_step'] = 2000
-  cfg_nerf['N_samples'] = 64
+  cfg_nerf['n_step'] = 3000
+  cfg_nerf['N_samples'] = 128
   cfg_nerf['N_samples_around_depth'] = 256
   cfg_nerf['first_frame_weight'] = 1
   cfg_nerf['down_scale_ratio'] = 1
-  cfg_nerf['finest_res'] = 256
+  cfg_nerf['finest_res'] = 512
   cfg_nerf['num_levels'] = 16
   cfg_nerf['mesh_resolution'] = 0.002
-  cfg_nerf['n_train_image'] = 500
+  cfg_nerf['n_train_image'] = 600
   cfg_nerf['fs_sdf'] = 0.1
   cfg_nerf['frame_features'] = 2
   cfg_nerf['rgb_weight'] = 100

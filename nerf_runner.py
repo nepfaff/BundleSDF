@@ -5,8 +5,8 @@
 # and any modifications thereto.  Any use, reproduction, disclosure or
 # distribution of this software and related documentation without an express
 # license agreement from NVIDIA CORPORATION is strictly prohibited.
-
-
+from offscreen_renderer import ModelRendererOffscreen
+from tqdm import tqdm
 import os, sys,copy,cv2,itertools,uuid,joblib,uuid
 import shutil
 from datetime import datetime
@@ -125,6 +125,8 @@ class NerfRunner:
     self.train_pose = False
     self.N_iters = self.cfg['n_step']+1
     self.build_octree_pts = np.asarray(build_octree_pcd.points).copy()   # Make it pickable
+
+    self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     down_scale_ratio = cfg['down_scale_ratio']
     self.down_scale = np.ones((2),dtype=np.float32)
@@ -1041,6 +1043,8 @@ class NerfRunner:
       z_std: [num_rays]. Standard deviation of distances along ray for each
         sample.
     """
+    valid_samples = None
+
     N_rays = ray_batch.shape[0]
     rays_d = ray_batch[:,self.ray_dir_slice]
     rays_o = torch.zeros_like(rays_d)
@@ -1144,29 +1148,34 @@ class NerfRunner:
         depth_map: [num_rays]. Estimated distance to object.
     """
     truncation = self.get_truncation()
-    if depth is not None:
-      depth = depth.view(-1,1)
-
     if valid_samples is None:
-      valid_samples = torch.ones(z_vals.shape, dtype=torch.bool).to(z_vals.device)
+        valid_samples = torch.ones(z_vals.shape, dtype=torch.bool).to(z_vals.device)
 
-    def sdf2weights(sdf):
-      sdf_from_depth = (depth.view(-1,1)-z_vals)/truncation
-      weights = torch.sigmoid(sdf_from_depth*self.cfg['sdf_lambda']) * torch.sigmoid(-sdf_from_depth*self.cfg['sdf_lambda'])  # This not work well
+    rgb = torch.sigmoid(raw[..., :3])  # [N_rays, N_samples, 3]
 
-      invalid = (depth>self.cfg['far']*self.cfg['sc_factor']).reshape(-1)
-      mask = (z_vals-depth<=truncation*self.cfg['neg_trunc_ratio']) & (z_vals-depth>=-truncation)
-      weights[~invalid] = weights[~invalid] * mask[~invalid]
-      weights[invalid] = 0
+    if depth is not None:
+        depth = depth.view(-1, 1)
+        sdf_from_depth = (depth - z_vals) / truncation
+        weights = torch.sigmoid(sdf_from_depth * self.cfg['sdf_lambda']) * torch.sigmoid(-sdf_from_depth * self.cfg['sdf_lambda'])
 
-      return weights / (weights.sum(dim=-1,keepdim=True) + 1e-10)
+        invalid = (depth > self.cfg['far'] * self.cfg['sc_factor']).reshape(-1)
+        mask = (z_vals - depth <= truncation * self.cfg['neg_trunc_ratio']) & (z_vals - depth >= -truncation)
+        weights[~invalid] = weights[~invalid] * mask[~invalid]
+        weights[invalid] = 0
+        weights = weights / (weights.sum(dim=-1, keepdim=True) + 1e-10)
+    else:
+        # Standard NeRF volume rendering
+        sigma = raw[..., 3]
+        deltas = z_vals[..., 1:] - z_vals[..., :-1]
+        delta_inf = 1e10 * torch.ones_like(deltas[..., :1])
+        deltas = torch.cat([deltas, delta_inf], dim=-1)  # [N_rays, N_samples]
+        alphas = 1 - torch.exp(-sigma * deltas)  # [N_rays, N_samples]
+        alphas = alphas * valid_samples.float()
+        cumprod_shifted = torch.cat([torch.ones((alphas.shape[0], 1), device=alphas.device), torch.cumprod(1 - alphas + 1e-10, -1)[:, :-1]], -1)
+        weights = alphas * cumprod_shifted  # [N_rays, N_samples]
 
-    rgb = torch.sigmoid(raw[...,:3])  # [N_rays, N_samples, 3]
-    weights = sdf2weights(raw[..., 3])
-
-    weights[valid_samples==0] = 0
-    rgb_map = torch.sum(weights[...,None] * rgb, -2)  # [N_rays, 3]
-
+    weights[valid_samples == 0] = 0
+    rgb_map = torch.sum(weights[..., None] * rgb, -2)  # [N_rays, 3]
     return rgb_map, weights
 
 
@@ -1479,7 +1488,7 @@ class NerfRunner:
     if self.models['pose_array'] is not None:
       tf = self.models['pose_array'].get_matrices(frame_ids)@tf
     tf = tf.data.cpu().numpy()
-    from offscreen_renderer import ModelRendererOffscreen
+    
 
     tex_image = torch.zeros((tex_res,tex_res,3)).cuda().float()
     weight_tex_image = torch.zeros(tex_image.shape[:-1]).cuda().float()
@@ -1518,9 +1527,6 @@ class NerfRunner:
       rays_o = transform_pts(rays_o,cvcam_in_ob)
       rays_d = locations-rays_o
       rays_d /= np.linalg.norm(rays_d,axis=-1).reshape(-1,1)
-      dots = (normals*(-rays_d)).sum(axis=-1)
-      ray_weights = np.ones((len(rays_o)))
-
 
       ############## CUDA
       uvs = torch.zeros((len(locations),2)).cuda().float()
@@ -1542,4 +1548,298 @@ class NerfRunner:
     tex_image = tex_image[::-1].copy()
     mesh.visual = trimesh.visual.texture.TextureVisuals(uv=mesh.visual.uv,image=Image.fromarray(tex_image))
     return mesh
+
+  def mesh_texture_from_train_images_with_interpolation(self, mesh, rgbs_raw, train_texture=False, tex_res=1024):
+    '''
+    @rgbs_raw: raw complete image that was trained on, no black holes
+    @mesh: in normalized space
+    '''
+    assert len(self.images)==len(rgbs_raw)
+
+    frame_ids = torch.arange(len(self.images)).long().cuda()
+    tf = self.c2w_array[frame_ids]
+    if self.models['pose_array'] is not None:
+      tf = self.models['pose_array'].get_matrices(frame_ids)@tf
+    tf = tf.data.cpu().numpy()
+    
+
+    tex_image = torch.zeros((tex_res,tex_res,3)).cuda().float()
+    weight_tex_image = torch.zeros(tex_image.shape[:-1]).cuda().float()
+    mesh.merge_vertices()
+    mesh.remove_duplicate_faces()
+    mesh = mesh.unwrap()
+    H,W = tex_image.shape[:2]
+    uvs_tex = (mesh.visual.uv*np.array([W-1,H-1]).reshape(1,2))    #(n_V,2)
+
+    renderer = ModelRendererOffscreen([], cam_K=self.K, H=self.H, W=self.W, zfar=self.cfg['far']*self.cfg['sc_factor'])
+    renderer.add_mesh(mesh)
+
+    vertices_cuda = torch.from_numpy(mesh.vertices).float().cuda()
+    faces_cuda = torch.from_numpy(mesh.faces).long().cuda()
+    face_vertices = torch.zeros((len(faces_cuda),3,3))
+    for i in range(3):
+      face_vertices[:,i] = vertices_cuda[faces_cuda[:,i]]
+
+    for i in range(len(rgbs_raw)):
+      print(f'project train_images {i}/{len(rgbs_raw)}')
+
+      ############# Raterization
+      cvcam_in_ob = tf[i]@np.linalg.inv(glcam_in_cvcam)
+      _, render_depth = renderer.render([np.linalg.inv(cvcam_in_ob)])
+      xyz_map = depth2xyzmap(render_depth, self.K)
+      mask = self.masks[i].reshape(self.H,self.W).astype(bool)
+      valid = (render_depth.reshape(self.H,self.W)>=0.1*self.cfg['sc_factor']) & (mask)
+      if valid.sum()==0:
+        continue
+      pts = xyz_map[valid].reshape(-1,3)
+      pts = transform_pts(pts, cvcam_in_ob)
+      ray_colors = rgbs_raw[i][valid].reshape(-1,3)
+      locations, distance, index_tri = trimesh.proximity.closest_point(mesh, pts)
+      normals = mesh.face_normals[index_tri]
+      rays_o = np.zeros((len(normals),3))
+      rays_o = transform_pts(rays_o,cvcam_in_ob)
+      rays_d = locations-rays_o
+      rays_d /= np.linalg.norm(rays_d,axis=-1).reshape(-1,1)
+
+      ############## CUDA
+      uvs = torch.zeros((len(locations),2)).cuda().float()
+      common.rayColorToTextureImageCUDA(torch.from_numpy(mesh.faces).cuda().long(), torch.from_numpy(mesh.vertices).cuda().float(), torch.from_numpy(locations).cuda().float(), torch.from_numpy(index_tri).cuda().long(), torch.from_numpy(uvs_tex).cuda().float(), uvs)
+      uvs = torch.round(uvs).long()
+      uvs_flat = uvs[:,1]*(W-1) + uvs[:,0]
+      uvs_flat_unique, inverse_ids, cnts = torch.unique(uvs_flat, return_counts=True, return_inverse=True)
+      perm = torch.arange(inverse_ids.size(0)).cuda()
+      inverse_ids, perm = inverse_ids.flip([0]), perm.flip([0])
+      unique_ids = inverse_ids.new_empty(uvs_flat_unique.size(0)).scatter_(0, inverse_ids, perm)
+      uvs_unique = torch.stack((uvs_flat_unique%(W-1), uvs_flat_unique//(W-1)), dim=-1).reshape(-1,2)
+      cur_weights = torch.ones((len(uvs_unique))).cuda().float()
+      tex_image[uvs_unique[:,1],uvs_unique[:,0]] += torch.from_numpy(ray_colors).cuda().float()[unique_ids]*cur_weights.reshape(-1,1)
+      weight_tex_image[uvs_unique[:,1], uvs_unique[:,0]] += cur_weights
+
+    # Normalize texture image by accumulated weights
+    tex_image = tex_image / weight_tex_image[..., None]
+
+    # Interpolation for missing vertices (after normalization)
+    missing_mask = weight_tex_image == 0
+    if missing_mask.any():
+        # tex_image = self.interpolate_missing_vertices(tex_image, missing_mask)
+        tex_image = self.interpolate_missing_vertices_nn_3d(mesh, tex_image, weight_tex_image, uvs_tex, vertices_cuda)
+
+    # Convert to numpy and apply final clipping
+    tex_image = tex_image.data.cpu().numpy()
+    tex_image = np.nan_to_num(tex_image, nan=0.0)  # Replace NaNs with 0
+    tex_image = np.clip(tex_image, 0, 255).astype(np.uint8)
+    tex_image = tex_image[::-1].copy()  # Flip vertically if necessary
+
+    # Assign the texture to the mesh
+    mesh.visual = trimesh.visual.texture.TextureVisuals(uv=mesh.visual.uv, image=Image.fromarray(tex_image))
+    
+    return mesh
+  
+  def interpolate_missing_vertices_nn_3d(self, mesh, tex_image, weight_tex_image, uvs_tex, vertices_cuda, batch_size=5000):
+    """
+    Perform nearest-neighbor interpolation in 3D space to fill in missing texture values, with batching to avoid memory overflow.
+    
+    Args:
+        mesh: The 3D mesh object.
+        tex_image: The texture image (with missing values).
+        weight_tex_image: A map indicating which pixels have valid color values.
+        uvs_tex: The UV coordinates for the mesh vertices.
+        vertices_cuda: The 3D vertices of the mesh in CUDA tensor format.
+        batch_size: The size of batches for processing missing UVs to avoid memory overload.
+    
+    Returns:
+        tex_image: The texture image with missing values filled using nearest-neighbor interpolation.
+    """
+    from scipy.spatial import KDTree
+
+    # Identify the missing pixels in the texture image
+    missing_mask = weight_tex_image == 0
+
+    # Move UV and vertex data to CPU if necessary
+    if isinstance(uvs_tex, torch.Tensor):
+        uvs_tex = uvs_tex.cpu().detach().numpy()
+    if isinstance(vertices_cuda, torch.Tensor):
+        vertices_cuda = vertices_cuda.cpu().detach().numpy()
+
+    # Map UV coordinates to texture resolution (integers)
+    uvs = (uvs_tex * np.array([tex_image.shape[1] - 1, tex_image.shape[0] - 1])).astype(int)
+
+    # Extract valid pixel locations in the texture image based on weight_tex_image
+    valid_mask = weight_tex_image > 0
+    valid_uvs = np.argwhere(valid_mask.cpu().detach().numpy())  # Get valid UV coordinates in texture space
+
+    # Map valid UVs to corresponding 3D vertices
+    valid_vertices = vertices_cuda[valid_uvs[:, 1]]  # Use second dimension since uvs_tex corresponds to vertices
+
+    # Build KDTree for valid vertices in 3D space
+    kd_tree = KDTree(valid_vertices)
+
+    # Get all missing UV coordinates
+    missing_uvs = np.argwhere(missing_mask.cpu().detach().numpy())
+
+    # Process missing pixels in batches to avoid memory overload
+    for i in tqdm(range(0, len(missing_uvs), batch_size), desc='Interpolating missing vertices'):
+        batch_missing_uvs = missing_uvs[i:i+batch_size]
+
+        # Map UV coordinates to 3D space using the mesh vertices
+        batch_missing_uvs_3d = vertices_cuda[
+          np.argmin(np.linalg.norm(uvs[:, None, :] - batch_missing_uvs[None, :, :], axis=2), axis=0)
+        ]
+
+        # Perform a batch query for nearest neighbors in 3D space
+        _, nearest_indices = kd_tree.query(batch_missing_uvs_3d)
+
+        # Assign colors for all missing pixels in the current batch
+        nearest_colors = tex_image[valid_uvs[nearest_indices][:, 0], valid_uvs[nearest_indices][:, 1]]
+        tex_image[batch_missing_uvs[:, 0], batch_missing_uvs[:, 1]] = nearest_colors
+
+    return tex_image
+
+
+  def interpolate_missing_vertices_gaussina(self, tex_image, missing_mask):
+    """
+    Interpolate missing texture pixels while avoiding influence from black (zero) values.
+
+    Args:
+        tex_image: The texture image (torch.Tensor), shape (H, W, 3).
+        missing_mask: A boolean mask indicating missing pixels in tex_image.
+
+    Returns:
+        tex_image: The texture image with interpolated values for the missing pixels.
+    """
+    from torch.nn.functional import conv2d
+
+    # Define a smoothing kernel (Gaussian-like)
+    kernel_size = 5
+    sigma = 1.0
+    grid = torch.arange(kernel_size, dtype=torch.float32, device=tex_image.device)
+    gaussian_kernel_1d = torch.exp(-((grid - kernel_size // 2) ** 2) / (2 * sigma ** 2))
+    gaussian_kernel_1d = gaussian_kernel_1d / gaussian_kernel_1d.sum()
+
+    # Create a 2D separable Gaussian kernel for 3 channels (RGB)
+    gaussian_kernel_2d = gaussian_kernel_1d.view(1, 1, -1, 1) * gaussian_kernel_1d.view(1, 1, 1, -1)
+    gaussian_kernel_2d = gaussian_kernel_2d.repeat(3, 1, 1, 1)  # Repeat for 3 channels (RGB)
+
+    # Create a mask for valid pixels (not black)
+    valid_mask = (~missing_mask.bool()).unsqueeze(-1).repeat(1, 1, 3).float()
+
+    # Multiply the tex_image by the valid_mask to exclude black pixels from affecting smoothing
+    valid_tex_image = tex_image * valid_mask
+
+    # Convolve the valid texture image with the Gaussian kernel
+    valid_tex_image_padded = torch.nn.functional.pad(valid_tex_image.permute(2, 0, 1).unsqueeze(0),
+                                                     (kernel_size // 2, kernel_size // 2, kernel_size // 2, kernel_size // 2),
+                                                     mode='reflect')
+    tex_image_smoothed = conv2d(valid_tex_image_padded, gaussian_kernel_2d, groups=3).squeeze().permute(1, 2, 0)
+
+    # Only apply the smoothed values to the missing pixels
+    tex_image[missing_mask] = tex_image_smoothed[missing_mask]
+
+    return tex_image
+
+
+  def mesh_texture_from_nerf(self, mesh, tex_res=1024):
+    """
+    Generate a texture for the mesh from the NeRF model by querying colors and applying barycentric interpolation.
+    Args:
+        mesh: The mesh to be textured, in normalized space.
+        tex_res: The resolution of the texture image to be generated.
+    Returns:
+        mesh: The textured mesh with the generated texture applied.
+    """
+
+    # Initialize the texture image and weight image
+    tex_image = torch.zeros((tex_res, tex_res, 3), dtype=torch.float32, device=self.device)
+    weight_tex_image = torch.zeros((tex_res, tex_res), dtype=torch.float32, device=self.device)
+
+    # Prepare the mesh for unwrapping
+    mesh.merge_vertices()
+    mesh.remove_duplicate_faces()
+    mesh = mesh.unwrap()
+
+    # Get UV coordinates for texture mapping
+    H_tex, W_tex = tex_image.shape[:2]
+    uvs_tex = (mesh.visual.uv * np.array([W_tex - 1, H_tex - 1]).reshape(1, 2)).astype(np.float32)  # (n_V, 2)
+
+    # Vertices and faces of the mesh
+    vertices_cuda = torch.from_numpy(mesh.vertices).float().to(self.device)
+    faces_cuda = torch.from_numpy(mesh.faces).long().to(self.device)
+
+    # Define the ray chunk size based on your GPU memory capacity
+    ray_chunk_size = 4096  # Adjust this value as needed
+
+    # Loop through the mesh vertices and query the NeRF model for colors
+    for i in range(0, faces_cuda.shape[0], ray_chunk_size):
+        # Extract the vertices of the current batch of faces
+        face_vertices = vertices_cuda[faces_cuda[i:i + ray_chunk_size]].reshape(-1, 3, 3)
+
+        # Compute barycentric coordinates and map to UV coordinates
+        uvs = self.barycentric_interpolation(face_vertices, uvs_tex[i:i + ray_chunk_size])
+
+        # Query the NeRF model using the interpolated points
+        inputs = face_vertices.reshape(-1, 1, 3)
+        viewdirs = torch.zeros((inputs.shape[0], 3), dtype=torch.float32, device=self.device)  # No viewdirs used
+        frame_ids = torch.zeros((inputs.shape[0]), dtype=torch.long, device=self.device)  # Single frame (if necessary)
+        tf = torch.eye(4, device=self.device).reshape(1, 4, 4).expand(inputs.shape[0], -1, -1)
+
+        # Query the NeRF model for colors
+        with torch.no_grad():
+            outputs_local, _, _ = self.run_network(inputs=inputs, viewdirs=viewdirs, frame_ids=frame_ids, tf=tf)
+
+        # Retrieve the RGB color values
+        ray_colors = torch.sigmoid(outputs_local[..., :3]).reshape(-1, 3).cpu().numpy()
+
+        # Apply the barycentric interpolation to compute the final texture
+        bary_uvs = torch.from_numpy(uvs).long().to(self.device)
+        tex_image[bary_uvs[:, 1], bary_uvs[:, 0]] += ray_colors
+        weight_tex_image[bary_uvs[:, 1], bary_uvs[:, 0]] += 1
+
+    # Normalize the texture image by dividing by the accumulated weights
+    tex_image = tex_image / weight_tex_image[..., None]
+    tex_image = torch.clamp(tex_image, 0, 255).byte().cpu().numpy()
+
+    # Assign the texture to the mesh
+    tex_image = tex_image[::-1].copy()  # Flip vertically if necessary
+    mesh.visual = trimesh.visual.texture.TextureVisuals(uv=mesh.visual.uv, image=Image.fromarray(tex_image))
+
+    return mesh
+
+
+  def barycentric_interpolation(self, face_vertices, uvs_tex):
+    """
+    Compute barycentric coordinates for the vertices of a face and map them to UV coordinates.
+
+    Args:
+        face_vertices: Tensor of shape (num_faces, 3, 3) representing the vertices of each face.
+        uvs_tex: Tensor of shape (num_faces, 3, 2) representing the UV coordinates of the mesh for each face.
+    Returns:
+        uvs: Interpolated UV coordinates.
+    """
+    # Extract the three vertices of the triangle (A, B, C)
+    v0, v1, v2 = face_vertices[:, 0], face_vertices[:, 1], face_vertices[:, 2]
+
+    # Ensure `uvs_tex` is shaped correctly (num_faces, 3, 2), so each face has 3 vertices with 2D UV coordinates
+    assert uvs_tex.shape[-1] == 2, "UV coordinates should be 2D."
+
+    # Compute the vectors from the first vertex to the others
+    edge1 = v1 - v0
+    edge2 = v2 - v0
+
+    # Compute the normal of the triangle to ensure it's valid
+    normal = torch.cross(edge1, edge2, dim=-1)
+
+    # Compute the areas using the magnitude of the cross product
+    area_total = torch.norm(normal, dim=-1, keepdim=True) + 1e-8  # Avoid division by zero
+
+    # Interpolate UVs using barycentric coordinates
+    # We calculate the area of sub-triangles formed with each vertex
+    uvs = (
+        (torch.cross(v1 - v0, v2 - v0, dim=-1).norm(dim=-1, keepdim=True) / area_total) * uvs_tex[:, 0:1] +
+        (torch.cross(v2 - v1, v0 - v1, dim=-1).norm(dim=-1, keepdim=True) / area_total) * uvs_tex[:, 1:2] +
+        (torch.cross(v0 - v2, v1 - v2, dim=-1).norm(dim=-1, keepdim=True) / area_total) * uvs_tex[:, 2:3]
+    )
+
+    return uvs
+
+
 
