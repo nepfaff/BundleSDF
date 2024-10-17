@@ -54,6 +54,9 @@ def compute_scene_bounds_worker(color_file,K,glcam_in_world,use_mask,rgb=None,de
   pts = xyz_map[valid].reshape(-1,3)
   if len(pts)==0:
     return None
+  if rgb.shape[-1] == 4:
+    # Remove alpha channel
+    rgb = rgb[..., :3]
   colors = rgb[valid].reshape(-1,3)
   pcd = toOpen3dCloud(pts,colors)
   pcd = pcd.voxel_down_sample(0.01)
