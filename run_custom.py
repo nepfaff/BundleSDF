@@ -75,7 +75,7 @@ def run_one_video(video_dir='/home/bowen/debug/2022-11-18-15-10-24_milk', out_fo
 
   for i in range(0,len(reader.color_files),args.stride):
     color_file = reader.color_files[i]
-    color = cv2.imread(color_file, cv2.IMREAD_COLOR)
+    color = cv2.imread(color_file)[...,:3]
     H0, W0 = color.shape[:2]
     depth = reader.get_depth(i)
     H,W = depth.shape[:2]

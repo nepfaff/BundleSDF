@@ -68,7 +68,7 @@ class YcbineoatReader:
 
 
   def get_color(self,i):
-    color = imageio.imread(self.color_files[i], cv2.IMREAD_COLOR)
+    color = imageio.imread(self.color_files[i])[...,:3]
     color = cv2.resize(color, (self.W,self.H), interpolation=cv2.INTER_NEAREST)
     return color
 

@@ -45,7 +45,7 @@ def imread_gray(path, augment_fn=None, client=SCANNET_CLIENT):
         image = cv2.imread(str(path), cv_type)
 
     if augment_fn is not None:
-        image = cv2.imread(str(path), cv2.IMREAD_COLOR)
+        image = cv2.imread(str(path))[...,:3]
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         image = augment_fn(image)
         image = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
