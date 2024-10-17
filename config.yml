@@ -46,7 +46,7 @@ base_res: 16
 num_levels: 4
 log2_hashmap_size: 22
 datadir: /mnt/9a72c439-d0a7-45e8-8d20-d7a235d02763/github/bundlesdf/data/bundlesdf_bundlesdf_e03000196
-n_train_image: 300
+n_train_image: 600
 use_octree: 1
 first_frame_weight: 10
 denoise_depth_use_octree_cloud: true

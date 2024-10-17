@@ -409,7 +409,7 @@ class BundleSdf:
     n_fg = (np.array(frame._fg_mask)>0).sum()
     if n_fg<100:
       logging.info(f"Frame {frame._id_str} cloud is empty, marked FAIL, roi={n_fg}")
-      frame._status = my_cpp.Frame.FAIL;
+      frame._status = my_cpp.Frame.FAIL
       self.bundler.forgetFrame(frame)
       return
 

@@ -26,7 +26,7 @@ def run_one_video(video_dir='/home/bowen/debug/2022-11-18-15-10-24_milk', out_fo
   cfg_bundletrack['depth_processing']["percentile"] = 95
   cfg_bundletrack['erode_mask'] = 3
   cfg_bundletrack['debug_dir'] = out_folder+'/'
-  cfg_bundletrack['bundle']['max_BA_frames'] = 10
+  cfg_bundletrack['bundle']['max_BA_frames'] = 10 # TODO
   cfg_bundletrack['bundle']['max_optimized_feature_loss'] = 0.03
   cfg_bundletrack['feature_corres']['max_dist_neighbor'] = 0.02
   cfg_bundletrack['feature_corres']['max_normal_neighbor'] = 30
@@ -67,7 +67,10 @@ def run_one_video(video_dir='/home/bowen/debug/2022-11-18-15-10-24_milk', out_fo
 
   tracker = BundleSdf(cfg_track_dir=cfg_track_dir, cfg_nerf_dir=cfg_nerf_dir, start_nerf_keyframes=5, use_gui=use_gui)
 
-  reader = YcbineoatReader(video_dir=video_dir, shorter_side=480)
+  # Note: specifying a shorter_side will downsample the images such that the shorter
+  # side of the image has the specified number of pixels.
+  # reader = YcbineoatReader(video_dir=video_dir, shorter_side=480)
+  reader = YcbineoatReader(video_dir=video_dir)
 
 
   for i in range(0,len(reader.color_files),args.stride):
@@ -89,7 +92,7 @@ def run_one_video(video_dir='/home/bowen/debug/2022-11-18-15-10-24_milk', out_fo
         mask = segmenter.run(color_file.replace('rgb','masks'))
       else:
         mask = reader.get_mask(i)
-        mask = cv2.resize(mask, (W,H), interpolation=cv2.INTER_NEAREST)
+      mask = cv2.resize(mask, (W,H), interpolation=cv2.INTER_NEAREST)
 
     if cfg_bundletrack['erode_mask']>0:
       kernel = np.ones((cfg_bundletrack['erode_mask'], cfg_bundletrack['erode_mask']), np.uint8)

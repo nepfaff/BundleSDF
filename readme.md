@@ -53,7 +53,7 @@ Then activate the venv:
 
 Then run the code:
 ```
-python run_custom.py --mode run_video --video_dir /home/bowen/debug/2022-11-18-15-10-24_milk --out_folder /home/bowen/debug/bundlesdf_2022-11-18-15-10-24_milk --use_segmenter 1 --use_gui 1 --debug_level 2
+python run_custom.py --mode run_video --video_dir /home/bowen/debug/2022-11-18-15-10-24_milk --out_folder /home/bowen/debug/bundlesdf_2022-11-18-15-10-24_milk --use_segmenter 0 --use_gui 1 --debug_level 2
 ```
 
 # Docker/Environment setup
@@ -89,7 +89,7 @@ Due to license issues, we are not able to include [XMem](https://github.com/hkch
 - Run your RGBD video (specify the video_dir and your desired output path). There are 3 steps.
 ```
 # Run joint tracking and reconstruction
-python run_custom.py --mode run_video --video_dir /home/bowen/debug/2022-11-18-15-10-24_milk --out_folder /home/bowen/debug/bundlesdf_2022-11-18-15-10-24_milk --use_segmenter 1 --use_gui 1 --debug_level 2
+python run_custom.py --mode run_video --video_dir /home/bowen/debug/2022-11-18-15-10-24_milk --out_folder /home/bowen/debug/bundlesdf_2022-11-18-15-10-24_milk --use_segmenter 0 --use_gui 1 --debug_level 2
 
 # 2) Run global refinement post-processing to refine the mesh
 python run_custom.py --mode global_refine --video_dir /home/bowen/debug/2022-11-18-15-10-24_milk --out_folder /home/bowen/debug/bundlesdf_2022-11-18-15-10-24_milk   # Change the path to your video_directory
