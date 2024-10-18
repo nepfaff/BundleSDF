@@ -1615,8 +1615,19 @@ class NerfRunner:
       tex_image[uvs_unique[:,1],uvs_unique[:,0]] += torch.from_numpy(ray_colors).cuda().float()[unique_ids]*cur_weights.reshape(-1,1)
       weight_tex_image[uvs_unique[:,1], uvs_unique[:,0]] += cur_weights
 
+    # Avoid division by values too close to zero
+    min_weight_threshold = 1e-5  # A small value to avoid dividing by very small weights
+    safe_weight_tex_image = torch.clamp(weight_tex_image, min=min_weight_threshold)
+
     # Normalize texture image by accumulated weights
-    tex_image = tex_image / weight_tex_image[..., None]
+    tex_image = tex_image / safe_weight_tex_image[..., None]
+
+    # Print tex image stats.
+    print(f"Texture image stats before interpolation: min={tex_image.min()}, max={tex_image.max()}, mean={tex_image.mean()}, std={tex_image.std()}")
+    print("Increase the scale factor if the texture is too dark.")
+
+    scale_factor = 1  # Adjust this factor to control brightness (e.g. 2)
+    tex_image = tex_image * scale_factor
 
     # Interpolation for missing vertices (after normalization)
     missing_mask = weight_tex_image == 0
@@ -1629,6 +1640,8 @@ class NerfRunner:
     tex_image = np.nan_to_num(tex_image, nan=0.0)  # Replace NaNs with 0
     tex_image = np.clip(tex_image, 0, 255).astype(np.uint8)
     tex_image = tex_image[::-1].copy()  # Flip vertically if necessary
+
+    print(f"Texture image stats (final): min={tex_image.min()}, max={tex_image.max()}, mean={tex_image.mean()}, std={tex_image.std()}")
 
     # Assign the texture to the mesh
     mesh.visual = trimesh.visual.texture.TextureVisuals(uv=mesh.visual.uv, image=Image.fromarray(tex_image))
