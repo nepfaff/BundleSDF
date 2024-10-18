@@ -1585,35 +1585,101 @@ class NerfRunner:
 
       ############# Raterization
       cvcam_in_ob = tf[i]@np.linalg.inv(glcam_in_cvcam)
+
+      # Use mesh to render depth images of same size as RGB images. This is more
+      # accurate than using the noisy depth images from the dataset.
       _, render_depth = renderer.render([np.linalg.inv(cvcam_in_ob)])
+      # Project depth to 3D points.
       xyz_map = depth2xyzmap(render_depth, self.K)
+
       mask = self.masks[i].reshape(self.H,self.W).astype(bool)
+      # Filter depth values that are too close to the camera.
       valid = (render_depth.reshape(self.H,self.W)>=0.1*self.cfg['sc_factor']) & (mask)
       if valid.sum()==0:
         continue
+
+      # Transform 3D points into the object's frame. cvcam_in_ob is X_OC. Trasformed
+      # points are p_Opi.
       pts = xyz_map[valid].reshape(-1,3)
       pts = transform_pts(pts, cvcam_in_ob)
+
+      # Get the RGB values of the valid points.
       ray_colors = rgbs_raw[i][valid].reshape(-1,3)
+
+      # Find the closest points on the mesh to the valid points.
       locations, distance, index_tri = trimesh.proximity.closest_point(mesh, pts)
-      normals = mesh.face_normals[index_tri]
-      rays_o = np.zeros((len(normals),3))
-      rays_o = transform_pts(rays_o,cvcam_in_ob)
-      rays_d = locations-rays_o
-      rays_d /= np.linalg.norm(rays_d,axis=-1).reshape(-1,1)
+
+      # normals = mesh.face_normals[index_tri]
+      # rays_o = np.zeros((len(normals),3))
+      # rays_o = transform_pts(rays_o,cvcam_in_ob)
+      # rays_d = locations-rays_o
+      # rays_d /= np.linalg.norm(rays_d,axis=-1).reshape(-1,1)
 
       ############## CUDA
-      uvs = torch.zeros((len(locations),2)).cuda().float()
-      common.rayColorToTextureImageCUDA(torch.from_numpy(mesh.faces).cuda().long(), torch.from_numpy(mesh.vertices).cuda().float(), torch.from_numpy(locations).cuda().float(), torch.from_numpy(index_tri).cuda().long(), torch.from_numpy(uvs_tex).cuda().float(), uvs)
+      # Initialize an empty tensor to store the UV coordinates of the hit points
+      uvs = torch.zeros((len(locations), 2)).cuda().float()
+
+      # Call a CUDA kernel to calculate the UV coordinates for each hit point on the mesh
+      # This kernel uses the mesh's faces, vertices, hit locations, and hit triangle indices to 
+      # map each hit point in 3D space to the corresponding UV space.
+      common.rayColorToTextureImageCUDA(
+          torch.from_numpy(mesh.faces).cuda().long(),      # Mesh faces (triangles) in CUDA tensor
+          torch.from_numpy(mesh.vertices).cuda().float(),  # Mesh vertices in CUDA tensor
+          torch.from_numpy(locations).cuda().float(),      # 3D locations of hit points
+          torch.from_numpy(index_tri).cuda().long(),       # Indices of the triangles hit
+          torch.from_numpy(uvs_tex).cuda().float(),        # Precomputed UV coordinates of the mesh
+          uvs                                              # Output tensor to store UV coordinates
+      )
+
+      # Round the UV coordinates to integer values, which correspond to pixel locations in the texture image
       uvs = torch.round(uvs).long()
-      uvs_flat = uvs[:,1]*(W-1) + uvs[:,0]
+
+      # Flatten the UV coordinates into a 1D array by calculating a linear index for each UV
+      # This flattens the 2D UV coordinates into a 1D index that represents the texture image.
+      # uvs[:, 1] * (W - 1): This scales the vertical UV coordinate by the texture width
+      # uvs[:, 0]: This adds the horizontal UV coordinate
+      uvs_flat = uvs[:, 1] * (W - 1) + uvs[:, 0]
+
+      # Get the unique UV coordinates and their inverse mapping, which helps in handling overlapping UVs.
+      # Some hit points might project to the same UV coordinates, and we want to combine them.
+      # uvs_flat_unique: Unique flattened UV coordinates
+      # inverse_ids: Indices that map the original UV coordinates to their corresponding unique UVs
+      # cnts: The count of how many times each unique UV coordinate appears (used for aggregation if needed)
       uvs_flat_unique, inverse_ids, cnts = torch.unique(uvs_flat, return_counts=True, return_inverse=True)
+
+      # Create a permutation array, which will allow us to reverse the order of the UVs later
+      # This is done to make sure we accumulate colors in the correct order when handling overlapping UVs.
       perm = torch.arange(inverse_ids.size(0)).cuda()
+
+      # Flip the inverse IDs and perm arrays to reverse their order
+      # This ensures that when we scatter the UV values later, the last occurrence of a UV gets processed first.
       inverse_ids, perm = inverse_ids.flip([0]), perm.flip([0])
+
+      # Use the inverse mapping to create a unique ID for each UV coordinate
+      # We scatter the perm array into the unique_ids array, ensuring that each UV gets its unique ID.
       unique_ids = inverse_ids.new_empty(uvs_flat_unique.size(0)).scatter_(0, inverse_ids, perm)
-      uvs_unique = torch.stack((uvs_flat_unique%(W-1), uvs_flat_unique//(W-1)), dim=-1).reshape(-1,2)
+
+      # Convert the unique flattened UV coordinates back into their 2D form
+      # uvs_unique[:, 0] is the horizontal coordinate (X), and uvs_unique[:, 1] is the vertical coordinate (Y)
+      uvs_unique = torch.stack((uvs_flat_unique % (W - 1), uvs_flat_unique // (W - 1)), dim=-1).reshape(-1, 2)
+
+      # Create a tensor of weights (currently binary, all set to 1)
+      # This tensor indicates how much each UV contributes to the final color
+      # In this case, it's set to 1 for every valid UV, meaning each hit contributes equally.
       cur_weights = torch.ones((len(uvs_unique))).cuda().float()
-      tex_image[uvs_unique[:,1],uvs_unique[:,0]] += torch.from_numpy(ray_colors).cuda().float()[unique_ids]*cur_weights.reshape(-1,1)
-      weight_tex_image[uvs_unique[:,1], uvs_unique[:,0]] += cur_weights
+
+      # Accumulate the ray colors into the texture image using the unique UV coordinates
+      # ray_colors are projected from the input images onto the mesh, and here we're accumulating them
+      # at the corresponding UV locations in the texture image.
+      # unique_ids: Ensures that we only add the color once for each unique UV
+      tex_image[
+        uvs_unique[:, 1], uvs_unique[:, 0]
+      ] += torch.from_numpy(ray_colors).cuda().float()[unique_ids] * cur_weights.reshape(-1, 1)
+
+      # Similarly, accumulate the weights in the weight texture image
+      # Each UV coordinate that receives a color also increments its weight.
+      # These weights will be used to normalize the texture image later.
+      weight_tex_image[uvs_unique[:, 1], uvs_unique[:, 0]] += cur_weights
 
     # Avoid division by values too close to zero
     min_weight_threshold = 1e-5  # A small value to avoid dividing by very small weights
