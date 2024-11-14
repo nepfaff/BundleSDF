@@ -749,7 +749,9 @@ class BundleSdf:
 
     mesh,sigma,query_pts = nerf.extract_mesh(voxel_size=self.cfg_nerf['mesh_resolution'],isolevel=0, return_sigma=True)
 
-    # Remove duplicate vertices that are very close to each other.
+    # Clean the mesh.
+    mesh.remove_degenerate_faces()
+    mesh.remove_duplicate_faces()
     mesh.merge_vertices()
 
     # Remove floaters around the main mesh by selecting the largest connected component.
