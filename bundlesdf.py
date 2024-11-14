@@ -113,10 +113,10 @@ def run_nerf(p_dict, kf_to_nerf_list, lock, cfg_nerf, translation, sc_factor, st
             rgbs.append(f['rgb'])
             depths.append(f['depth'])
             masks.append(f['mask'])
-            if f['normal_map'] is not None:
-              normal_maps.append(f['normal_map'])
-            if f['occ_mask'] is not None:
-              occ_masks.append(f['occ_mask'])
+            if f.get('normal_map') is not None:
+                normal_maps.append(f['normal_map'])
+            if f.get('occ_mask') is not None:
+                occ_masks.append(f['occ_mask'])
           K = p_dict['K']
           nerf_num_frames += len(rgbs)
           p_dict['nerf_num_frames'] = nerf_num_frames
@@ -546,24 +546,26 @@ class BundleSdf:
     self.process_new_frame(frame)
     logging.info(f"processNewFrame done {frame._id_str}")
 
-    if self.bundler._keyframes[-1]==frame:
+    if self.bundler._keyframes[-1] == frame:
       logging.info(f"{frame._id_str} prepare data for nerf")
-
+      
       with self.lock:
         self.p_dict['frame_id'] = frame._id_str
         self.p_dict['running'] = True
-        self.kf_to_nerf_list.append({
-          'rgb': np.array(frame._color).reshape(H,W,3)[...,::-1].copy(),
-          'depth': np.array(frame._depth).reshape(H,W).copy(),
-          'mask': np.array(frame._fg_mask).reshape(H,W).copy(),
-          # 'occ_mask': occ_mask.reshape(H,W),
-          # 'normal_map': np.array(frame._normal_map).copy(),
-          'occ_mask': None,
-          'normal_map': None,
-          })
-        cam_in_obs = []
-        for f in self.bundler._keyframes:
-          cam_in_obs.append(np.array(f._pose_in_model).copy())
+        
+        # Collect data from current keyframes
+        kf_data = []
+        for kf in self.bundler._keyframes:
+            kf_data.append({
+                'rgb': np.array(kf._color).reshape(H,W,3)[...,::-1].copy(),
+                'depth': np.array(kf._depth).reshape(H,W).copy(),
+                'mask': np.array(kf._fg_mask).reshape(H,W).copy(),
+                # Add any other necessary data
+            })
+        
+        self.kf_to_nerf_list.extend(kf_data)
+        
+        cam_in_obs = [np.array(kf._pose_in_model).copy() for kf in self.bundler._keyframes]
         self.p_dict['cam_in_obs'] = np.array(cam_in_obs)
 
       if self.SPDLOG>=2:
@@ -636,32 +638,55 @@ class BundleSdf:
 
 
 
-  def run_global_nerf(self, reader=None, get_texture=False, tex_res=1024):
+  def run_global_nerf(self, reader=None, get_texture=False, tex_res=1024, use_dino_frames=False):
     '''
     @reader: data reader, sometimes we want to use the full resolution raw image
     '''
     self.K = np.loadtxt(f'{self.debug_dir}/cam_K.txt').reshape(3,3)
 
-    tmp = sorted(glob.glob(f"{self.debug_dir}/ob_in_cam/*"))
-    last_stamp = os.path.basename(tmp[-1]).replace('.txt','')
-    logging.info(f'last_stamp {last_stamp}')
-    keyframes = yaml.load(open(f'{self.debug_dir}/{last_stamp}/keyframes.yml','r'))
-    logging.info(f"keyframes#: {len(keyframes)}")
-    keys = list(keyframes.keys())
-    if len(keyframes)>self.cfg_nerf['n_train_image']:
-      keys = [keys[0]] + list(np.random.choice(keys, self.cfg_nerf['n_train_image'], replace=False))
-      keys = list(set(keys))
-      logging.info(f"frame_ids too large, select subset num: {len(keys)}")
+    if use_dino_frames:
+      print(f"Using all frames in {self.debug_dir}/dino_images for global nerf")
+      if not os.path.exists(f"{self.debug_dir}/dino_images"):
+          raise ValueError(f"Directory {self.debug_dir}/dino_images not found")
 
-    frame_ids = []
-    for k in keys:
-      frame_ids.append(k.replace('keyframe_',''))
+      # Load all frame IDs from the color_segmented directory
+      frame_files = sorted(glob.glob(f"{self.debug_dir}/dino_images/*.png"))
+      frame_ids = [os.path.basename(f).replace('.png','') for f in frame_files]
+      logging.info(f"Total frames#: {len(frame_ids)}")
 
-    cam_in_obs = []
-    for k in keys:
-      cam_in_ob = np.array(keyframes[k]['cam_in_ob']).reshape(4,4)
-      cam_in_obs.append(cam_in_ob)
-    cam_in_obs = np.array(cam_in_obs)
+      # Load camera poses for all frames
+      cam_in_obs = []
+      for frame_id in frame_ids:
+          cam_in_ob_file = f"{self.debug_dir}/ob_in_cam/{frame_id}.txt"
+          if os.path.exists(cam_in_ob_file):
+              cam_in_ob = np.loadtxt(cam_in_ob_file).reshape(4,4)
+              cam_in_obs.append(cam_in_ob)
+          else:
+              logging.warning(f"Camera pose file not found for frame {frame_id}")
+              frame_ids.remove(frame_id)  # Remove frame_id if pose is missing
+      cam_in_obs = np.array(cam_in_obs)
+    else:
+      print("Using keyframes for global nerf")
+      tmp = sorted(glob.glob(f"{self.debug_dir}/ob_in_cam/*"))
+      last_stamp = os.path.basename(tmp[-1]).replace('.txt','')
+      logging.info(f'last_stamp {last_stamp}')
+      keyframes = yaml.load(open(f'{self.debug_dir}/{last_stamp}/keyframes.yml','r'))
+      logging.info(f"keyframes#: {len(keyframes)}")
+      keys = list(keyframes.keys())
+      if len(keyframes)>self.cfg_nerf['n_train_image']:
+          keys = [keys[0]] + list(np.random.choice(keys, self.cfg_nerf['n_train_image'], replace=False))
+          keys = list(set(keys))
+          logging.info(f"frame_ids too large, select subset num: {len(keys)}")
+
+      frame_ids = []
+      for k in keys:
+          frame_ids.append(k.replace('keyframe_',''))
+
+      cam_in_obs = []
+      for k in keys:
+          cam_in_ob = np.array(keyframes[k]['cam_in_ob']).reshape(4,4)
+          cam_in_obs.append(cam_in_ob)
+      cam_in_obs = np.array(cam_in_obs)
 
     out_dir = f"{self.debug_dir}/final/nerf"
     os.system(f"rm -rf {out_dir} && mkdir -p {out_dir}")
@@ -673,22 +698,26 @@ class BundleSdf:
     masks = []
     occ_masks = []
     for frame_id in frame_ids:
-      if reader is not None:
-        self.K = reader.K.copy()
-        id = reader.id_strs.index(frame_id)
-        rgbs.append(reader.get_color(id))
-        depths.append(reader.get_depth(id))
-        masks.append(reader.get_mask(id))
-      else:
-        self.cfg_nerf['down_scale_ratio'] = 1   # Images have been downscaled in tracking outputs
-        rgb_file = f"{self.debug_dir}/color_segmented/{frame_id}.png"
-        shutil.copy(rgb_file, f'{self.debug_dir}/final/used_rgbs/')
-        rgb = imageio.imread(rgb_file)
-        depth = cv2.imread(rgb_file.replace('color_segmented','depth_filtered'),-1)/1e3
-        mask = cv2.imread(rgb_file.replace('color_segmented','mask'),-1)
-        rgbs.append(rgb)
-        depths.append(depth)
-        masks.append(mask)
+        if reader is not None:
+            self.K = reader.K.copy()
+            id = reader.id_strs.index(frame_id)
+            rgbs.append(reader.get_color(id))
+            depths.append(reader.get_depth(id))
+            masks.append(reader.get_mask(id))
+        else:
+            self.cfg_nerf['down_scale_ratio'] = 1   # Images have been downscaled in tracking outputs
+            rgb_file = f"{self.debug_dir}/color_segmented/{frame_id}.png"
+            shutil.copy(rgb_file, f'{self.debug_dir}/final/used_rgbs/')
+            rgb = imageio.imread(rgb_file)
+            depth_file = rgb_file.replace('color_segmented','depth_filtered')
+            depth = cv2.imread(depth_file,-1)/1e3 if os.path.exists(depth_file) else None
+            mask_file = rgb_file.replace('color_segmented','mask')
+            mask = cv2.imread(mask_file,-1) if os.path.exists(mask_file) else None
+            rgbs.append(rgb)
+            depths.append(depth)
+            masks.append(mask)
+
+    print(f"Using {len(rgbs)} frames for global nerf")
 
     glcam_in_obs = cam_in_obs@glcam_in_cvcam
 
@@ -769,8 +798,8 @@ class BundleSdf:
     mesh.export(f'{self.debug_dir}/mesh_cleaned.obj')
 
     if get_texture:
-      # mesh = nerf.mesh_texture_from_train_images(mesh, rgbs_raw=rgbs_raw, train_texture=False, tex_res=tex_res)
-      mesh = nerf.mesh_texture_from_train_images_with_interpolation(mesh, rgbs_raw=rgbs_raw, train_texture=False, tex_res=tex_res)
+      mesh = nerf.mesh_texture_from_train_images(mesh, rgbs_raw=rgbs_raw, train_texture=False, tex_res=tex_res)
+      # mesh = nerf.mesh_texture_from_train_images_with_interpolation(mesh, rgbs_raw=rgbs_raw, train_texture=False, tex_res=tex_res)
       # mesh = nerf.mesh_texture_from_nerf(mesh, tex_res=tex_res)
 
     mesh = mesh_to_real_world(mesh, pose_offset=offset, translation=self.cfg_nerf['translation'], sc_factor=self.cfg_nerf['sc_factor'])

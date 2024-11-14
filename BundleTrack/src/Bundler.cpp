@@ -59,18 +59,28 @@ Bundler::~Bundler()
   SPDLOG("Destructor");
 }
 
-bool Bundler::forgetFrame(const std::shared_ptr<Frame> &f)
+bool Bundler::forgetFrame(const std::shared_ptr<Frame> &f, bool allow_keyframe_forgetting=false)
 {
-  if (f==NULL) return false;
-  if (std::find(_keyframes.begin(),_keyframes.end(),f)==_keyframes.end())
-  {
-    SPDLOG("forgetting frame {}",f->_id_str);
-    _fm->forgetFrame(f);
-    _frames.erase(f->_id);
-    return true;
-  }
-  return false;
-};
+    if (f == NULL) return false;
+    if (allow_keyframe_forgetting || std::find(_keyframes.begin(), _keyframes.end(), f) == _keyframes.end())
+    {
+        SPDLOG("Forgetting frame {}", f->_id_str);
+        _fm->forgetFrame(f);
+        _frames.erase(f->_id);
+        
+        // Remove from keyframes if allowed
+        if (allow_keyframe_forgetting)
+        {
+            auto it = std::find(_keyframes.begin(), _keyframes.end(), f);
+            if (it != _keyframes.end())
+            {
+                _keyframes.erase(it);
+            }
+        }
+        return true;
+    }
+    return false;
+}
 
 
 void Bundler::processNewFrame(std::shared_ptr<Frame> frame)
@@ -259,67 +269,96 @@ void Bundler::processNewFrame(std::shared_ptr<Frame> frame)
   bool added = checkAndAddKeyframe(frame);
 }
 
+float calculateMaskSimilarity(const cv::Mat &mask1, const cv::Mat &mask2) {
+    // Ensure both masks are of the same size and type
+    if (mask1.size() != mask2.size() || mask1.type() != mask2.type()) {
+        SPDLOG("Mask dimensions or types do not match for similarity calculation.");
+        return 0.0f;
+    }
+
+    // Calculate Intersection over Union (IoU) as similarity metric
+    cv::Mat intersection, union_;
+    cv::bitwise_and(mask1, mask2, intersection);
+    cv::bitwise_or(mask1, mask2, union_);
+
+    float intersection_count = static_cast<float>(cv::countNonZero(intersection));
+    float union_count = static_cast<float>(cv::countNonZero(union_));
+
+    // Return similarity as IoU (intersection over union)
+    return (union_count == 0) ? 0.0f : intersection_count / union_count;
+}
 
 bool Bundler::checkAndAddKeyframe(std::shared_ptr<Frame> frame)
 {
-  if (frame->_id==0)
-  {
-    _keyframes.push_back(frame);
-    SPDLOG("Added frame {} as keyframe, current #keyframe: {}", frame->_id_str, _keyframes.size());
+    if (frame->_id == 0)  // The first frame is always a keyframe
+    {
+        _keyframes.push_back(frame);
+        SPDLOG("Added frame {} as keyframe, current #keyframes: {}", frame->_id_str, _keyframes.size());
+        return true;
+    }
+    if (frame->_status != Frame::OTHER) return false;
+
+    const int min_feat_num = (*yml)["keyframe"]["min_feat_num"].as<int>();
+    const float min_rot = (*yml)["keyframe"]["min_rot"].as<float>() / 180.0f * M_PI;
+
+    if (frame->_keypts.size() < min_feat_num)
+    {
+        SPDLOG("Frame {} not selected as keyframe due to insufficient keypoints: {}", frame->_id_str, frame->_keypts.size());
+        return false;
+    }
+
+    // Check valid points compared to the first frame
+    int n_valid = frame->countValidPoints();
+    int n_first_valid = _firstframe->countValidPoints();
+    if (n_valid < n_first_valid / 10.0f)
+    {
+        SPDLOG("Frame {} not selected as keyframe; valid points {} too small compared to {}", frame->_id_str, n_valid, n_first_valid);
+        return false;
+    }
+
+    bool replaced_existing = false;
+
+    for (size_t i = 0; i < _keyframes.size(); ++i)
+    {
+        auto &kf = _keyframes[i];
+        float rot_diff = Utils::rotationGeodesicDistanceIgnoreRotationAroundCamZ(
+            frame->_pose_in_model.block(0, 0, 3, 3).transpose(),
+            kf->_pose_in_model.block(0, 0, 3, 3).transpose()
+        );
+
+        if (rot_diff < min_rot)
+        {
+            int frame_mask_area = cv::countNonZero(frame->_fg_mask);
+            int kf_mask_area = cv::countNonZero(kf->_fg_mask);
+
+            if (frame_mask_area > kf_mask_area)
+            {
+                // Replace the existing keyframe with the new frame
+                SPDLOG("Frame {} replaces keyframe {} due to larger mask area ({} > {})",
+                      frame->_id_str, kf->_id_str, frame_mask_area, kf_mask_area);
+                _keyframes[i].reset();  // Release memory
+                forgetFrame(kf, true);
+                _keyframes[i] = frame;  // Replace keyframe
+                replaced_existing = true;
+                break;  // Exit the loop after replacing
+            }
+            else
+            {
+                SPDLOG("Frame {} not selected as keyframe; similar rotation to {} but smaller or equal mask area ({} <= {})",
+                      frame->_id_str, kf->_id_str, frame_mask_area, kf_mask_area);
+                return false;
+            }
+        }
+    }
+
+    if (!replaced_existing)
+    {
+        // If no similar keyframe was found, add this frame as a new keyframe
+        _keyframes.push_back(frame);
+        SPDLOG("Added frame {} as keyframe, current #keyframes: {}", frame->_id_str, _keyframes.size());
+    }
+
     return true;
-  }
-  if (frame->_status!=Frame::OTHER) return false;
-
-  const int min_interval = (*yml)["keyframe"]["min_interval"].as<int>();
-  const int min_feat_num = (*yml)["keyframe"]["min_feat_num"].as<int>();
-  const float min_trans = (*yml)["keyframe"]["min_trans"].as<float>();
-  const float min_rot = (*yml)["keyframe"]["min_rot"].as<float>()/180.0*M_PI;
-
-  if (frame->_keypts.size()<min_feat_num)
-  {
-    SPDLOG("frame {} not selected as keyframe since its kpts size is {}", frame->_id_str, frame->_keypts.size());
-    return false;
-  }
-
-  int n_valid = frame->countValidPoints();
-  int n_first_valid = _firstframe->countValidPoints();
-  if (n_valid<n_first_valid/10.0)
-  {
-    SPDLOG("frame {} not selected as keyframe, valid pts# {} too small compared to {}", n_valid, n_first_valid);
-    return false;
-  }
-
-  //Check trans and rot diversity
-  for (int i=0;i<_keyframes.size();i++)
-  {
-    const auto &kf = _keyframes[i];
-    const auto &k_pose = kf->_pose_in_model;
-    const auto &cur_pose = frame->_pose_in_model;
-    float rot_diff = Utils::rotationGeodesicDistanceIgnoreRotationAroundCamZ(cur_pose.block(0,0,3,3).transpose(), k_pose.block(0,0,3,3).transpose());
-    float trans_diff = (cur_pose.inverse().block(0,3,3,1)-k_pose.inverse().block(0,3,3,1)).norm();
-    if (rot_diff<min_rot)
-    {
-      SPDLOG("frame {} not selected as keyframe since its rot diff with frame {} is {} deg", frame->_id_str, kf->_id_str, rot_diff/M_PI*180);
-      return false;
-    }
-  }
-
-  const float &min_visible = (*yml)["keyframe"]["min_visible"].as<float>();
-  for (int i=0;i<_keyframes.size();i++)
-  {
-    const auto &kf = _keyframes[i];
-    float visible = computeCovisibility(_newframe, kf);
-    if (visible>min_visible)
-    {
-      SPDLOG("frame {} not selected as keyframe since share visible {} with frame {}", _newframe->_id_str, visible, kf->_id_str);
-      return false;
-    }
-  }
-
-  _keyframes.push_back(frame);
-  SPDLOG("Added frame {} as keyframe, current #keyframe: {}", frame->_id_str, _keyframes.size());
-  return true;
-
 }
 
 

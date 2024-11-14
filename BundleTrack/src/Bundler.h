@@ -63,7 +63,7 @@ public:
   Bundler(std::shared_ptr<YAML::Node> yml1);
   Bundler(const Bundler &other){};
   ~Bundler();
-  bool forgetFrame(const std::shared_ptr<Frame> &f);
+  bool forgetFrame(const std::shared_ptr<Frame> &f, bool allow_keyframe_forgetting);
   void processNewFrame(std::shared_ptr<Frame> frame);
   bool checkAndAddKeyframe(std::shared_ptr<Frame> frame);
   void optimizeToPrev(std::shared_ptr<Frame> frame);

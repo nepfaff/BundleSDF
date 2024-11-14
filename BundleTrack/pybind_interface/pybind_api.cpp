@@ -178,7 +178,8 @@ PYBIND11_MODULE(my_cpp, m)
         Bundler p;
         return p;
       }))
-    .def("forgetFrame", &Bundler::forgetFrame, py::call_guard<py::gil_scoped_release>())
+    .def("forgetFrame", &Bundler::forgetFrame, py::call_guard<py::gil_scoped_release>(),
+     py::arg("f"), py::arg("allow_keyframe_forgetting") = false)
     .def("checkAndAddKeyframe", &Bundler::checkAndAddKeyframe, py::call_guard<py::gil_scoped_release>())
     .def("optimizeGPU", &Bundler::optimizeGPU, py::call_guard<py::gil_scoped_release>())
     .def("selectKeyFramesForBA", &Bundler::selectKeyFramesForBA, py::call_guard<py::gil_scoped_release>())
