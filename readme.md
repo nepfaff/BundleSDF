@@ -104,6 +104,15 @@ python run_custom.py --mode draw_pose --out_folder /home/bowen/debug/bundlesdf_2
 <img src="./media/milk_jug.gif" height="400">
 
 
+# Run on moving object data
+
+```shell
+python run_custom.py --mode run_video --video_dir data/move_camera_closer --out_folder test/move_camera_closer --use_segmenter 0 --use_gui 1 --debug_level 2
+```
+
+where `data/move_camera_closer` contains the moving object data.
+
+
 # Run on HO3D dataset
 ```
 # Run BundleSDF to get the pose and reconstruction results
