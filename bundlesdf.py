@@ -451,7 +451,7 @@ class BundleSdf:
       visibles = np.array(visibles)
       ids = np.argsort(visibles)[::-1]
       found = False
-      pdb.set_trace()
+      # pdb.set_trace()
       for id in ids:
         kf = self.bundler._keyframes[id]
         logging.info(f"trying new ref frame {kf._id_str}")
@@ -636,32 +636,52 @@ class BundleSdf:
 
 
 
-  def run_global_nerf(self, reader=None, get_texture=False, tex_res=1024):
+  def run_global_nerf(self, reader=None, get_texture=False, tex_res=1024, use_all_frames=False):
     '''
     @reader: data reader, sometimes we want to use the full resolution raw image
     '''
     self.K = np.loadtxt(f'{self.debug_dir}/cam_K.txt').reshape(3,3)
 
-    tmp = sorted(glob.glob(f"{self.debug_dir}/ob_in_cam/*"))
-    last_stamp = os.path.basename(tmp[-1]).replace('.txt','')
-    logging.info(f'last_stamp {last_stamp}')
-    keyframes = yaml.load(open(f'{self.debug_dir}/{last_stamp}/keyframes.yml','r'))
-    logging.info(f"keyframes#: {len(keyframes)}")
-    keys = list(keyframes.keys())
-    if len(keyframes)>self.cfg_nerf['n_train_image']:
-      keys = [keys[0]] + list(np.random.choice(keys, self.cfg_nerf['n_train_image'], replace=False))
-      keys = list(set(keys))
-      logging.info(f"frame_ids too large, select subset num: {len(keys)}")
-
-    frame_ids = []
-    for k in keys:
-      frame_ids.append(k.replace('keyframe_',''))
-
-    cam_in_obs = []
-    for k in keys:
-      cam_in_ob = np.array(keyframes[k]['cam_in_ob']).reshape(4,4)
-      cam_in_obs.append(cam_in_ob)
-    cam_in_obs = np.array(cam_in_obs)
+    if use_all_frames:
+      print(f"Using all frames in {self.debug_dir}/color_segmented for global nerf")
+      if not os.path.exists(f"{self.debug_dir}/color_segmented"):
+          raise ValueError(f"Directory {self.debug_dir}/color_segmented not found")
+      # Load all frame IDs from the color_segmented directory
+      frame_files = sorted(glob.glob(f"{self.debug_dir}/color_segmented/*.png"))
+      frame_ids = [os.path.basename(f).replace('.png','') for f in frame_files]
+      logging.info(f"Total frames#: {len(frame_ids)}")
+      # Load camera poses for all frames
+      cam_in_obs = []
+      for frame_id in frame_ids:
+          ob_in_cam_file = f"{self.debug_dir}/ob_in_cam/{frame_id}.txt"
+          if os.path.exists(ob_in_cam_file):
+              ob_in_cam = np.loadtxt(ob_in_cam_file).reshape(4,4)
+              cam_in_ob = np.linalg.inv(ob_in_cam)  # Invert to get cam_in_ob
+              cam_in_obs.append(cam_in_ob)
+          else:
+              logging.warning(f"Camera pose file not found for frame {frame_id}")
+              frame_ids.remove(frame_id)  # Remove frame_id if pose is missing
+      cam_in_obs = np.array(cam_in_obs)
+    else:
+      print("Using keyframes for global nerf")
+      tmp = sorted(glob.glob(f"{self.debug_dir}/ob_in_cam/*"))
+      last_stamp = os.path.basename(tmp[-1]).replace('.txt','')
+      logging.info(f'last_stamp {last_stamp}')
+      keyframes = yaml.load(open(f'{self.debug_dir}/{last_stamp}/keyframes.yml','r'))
+      logging.info(f"keyframes#: {len(keyframes)}")
+      keys = list(keyframes.keys())
+      if len(keyframes)>self.cfg_nerf['n_train_image']:
+          keys = [keys[0]] + list(np.random.choice(keys, self.cfg_nerf['n_train_image'], replace=False))
+          keys = list(set(keys))
+          logging.info(f"frame_ids too large, select subset num: {len(keys)}")
+      frame_ids = []
+      for k in keys:
+          frame_ids.append(k.replace('keyframe_',''))
+      cam_in_obs = []
+      for k in keys:
+          cam_in_ob = np.array(keyframes[k]['cam_in_ob']).reshape(4,4)
+          cam_in_obs.append(cam_in_ob)
+      cam_in_obs = np.array(cam_in_obs)
 
     out_dir = f"{self.debug_dir}/final/nerf"
     os.system(f"rm -rf {out_dir} && mkdir -p {out_dir}")
@@ -689,6 +709,8 @@ class BundleSdf:
         rgbs.append(rgb)
         depths.append(depth)
         masks.append(mask)
+
+    print(f"Using {len(rgbs)} frames for global nerf")
 
     glcam_in_obs = cam_in_obs@glcam_in_cvcam
 

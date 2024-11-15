@@ -152,7 +152,7 @@ def run_one_video_global_nerf(out_folder='/home/bowen/debug/bundlesdf_scan_coffe
 
   tracker = BundleSdf(cfg_track_dir=cfg_track_dir, cfg_nerf_dir=cfg_nerf_dir, start_nerf_keyframes=5)
   tracker.cfg_nerf = cfg_nerf
-  tracker.run_global_nerf(reader=reader, get_texture=True, tex_res=2048)
+  tracker.run_global_nerf(reader=reader, get_texture=True, tex_res=2048, use_all_frames=True)
   tracker.on_finish()
 
   print(f"Done")

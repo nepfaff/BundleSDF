@@ -106,6 +106,23 @@ python run_custom.py --mode draw_pose --out_folder /home/bowen/debug/bundlesdf_2
 
 # Run on moving object data
 
+## Downsample iamges with DINO
+
+```shell
+python sample_most_disimilar_images.py --image_dir data/move_camera_closer/rgb --output_dir data/move_camera_closer/rgb_downsampled
+```
+Then replace the `rgb` folder with the downsampled one.
+
+### Visualize whether the downsampled images are temporally dense enough for tracking
+
+Navigate to the image folder and run the following:
+
+```shell
+ffmpeg -framerate 15 -pattern_type glob -i "*.png" -c:v libx264 -pix_fmt yuv420p video.mp4
+```
+
+## Run BundleSDF
+
 ```shell
 python run_custom.py --mode run_video --video_dir data/move_camera_closer --out_folder test/move_camera_closer --use_segmenter 0 --use_gui 1 --debug_level 2
 ```

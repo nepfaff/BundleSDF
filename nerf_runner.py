@@ -1507,8 +1507,7 @@ class NerfRunner:
     for i in range(3):
       face_vertices[:,i] = vertices_cuda[faces_cuda[:,i]]
 
-    for i in range(len(rgbs_raw)):
-      print(f'project train_images {i}/{len(rgbs_raw)}')
+    for i in tqdm(range(len(rgbs_raw)), desc="Projecting train_images"):
 
       ############# Raterization
       cvcam_in_ob = tf[i]@np.linalg.inv(glcam_in_cvcam)
@@ -1580,8 +1579,7 @@ class NerfRunner:
     for i in range(3):
       face_vertices[:,i] = vertices_cuda[faces_cuda[:,i]]
 
-    for i in range(len(rgbs_raw)):
-      print(f'project train_images {i}/{len(rgbs_raw)}')
+    for i in tqdm(range(len(rgbs_raw)), desc="Projecting train_images"):
 
       ############# Raterization
       cvcam_in_ob = tf[i]@np.linalg.inv(glcam_in_cvcam)
