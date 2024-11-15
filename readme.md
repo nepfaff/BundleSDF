@@ -111,7 +111,8 @@ python run_custom.py --mode draw_pose --out_folder /home/bowen/debug/bundlesdf_2
 ```shell
 python sample_most_disimilar_images.py --image_dir data/move_camera_closer/rgb --output_dir data/move_camera_closer/rgb_downsampled
 ```
-Then replace the `rgb` folder with the downsampled one.
+Then replace the `rgb` folder with the downsampled one. Note that `--N` must be small
+enough to prevent ambiguitities but will depend on the frame rate and object moving speed.
 
 ### Visualize whether the downsampled images are temporally dense enough for tracking
 
