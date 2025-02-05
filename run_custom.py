@@ -15,13 +15,13 @@ sys.path.append(code_dir)
 from segmentation_utils import Segmenter
 
 
-def run_one_video(video_dir='/home/bowen/debug/2022-11-18-15-10-24_milk', out_folder='/home/bowen/debug/bundlesdf_2022-11-18-15-10-24_milk/', use_segmenter=False, use_gui=False):
+def run_one_video(video_dir='/home/bowen/debug/2022-11-18-15-10-24_milk', out_folder='/home/bowen/debug/bundlesdf_2022-11-18-15-10-24_milk/', use_segmenter=False, use_gui=False, debug_level=0):
   set_seed(0)
 
   os.system(f'rm -rf {out_folder} && mkdir -p {out_folder}')
 
   cfg_bundletrack = yaml.load(open(f"{code_dir}/BundleTrack/config_ho3d.yml",'r'))
-  cfg_bundletrack['SPDLOG'] = int(args.debug_level)
+  cfg_bundletrack['SPDLOG'] = debug_level
   cfg_bundletrack['depth_processing']["zfar"] = 1
   cfg_bundletrack['depth_processing']["percentile"] = 95
   cfg_bundletrack['erode_mask'] = 3
@@ -73,7 +73,7 @@ def run_one_video(video_dir='/home/bowen/debug/2022-11-18-15-10-24_milk', out_fo
   reader = YcbineoatReader(video_dir=video_dir)
 
 
-  for i in range(0,len(reader.color_files),args.stride):
+  for i in range(0,len(reader.color_files),1):
     color_file = reader.color_files[i]
     color = cv2.imread(color_file)[...,:3]
     H0, W0 = color.shape[:2]
@@ -107,11 +107,11 @@ def run_one_video(video_dir='/home/bowen/debug/2022-11-18-15-10-24_milk', out_fo
 
   tracker.on_finish()
 
-  run_one_video_global_nerf(out_folder=out_folder)
+  run_one_video_global_nerf(video_dir=video_dir, out_folder=out_folder)
 
 
 
-def run_one_video_global_nerf(out_folder='/home/bowen/debug/bundlesdf_scan_coffee_415'):
+def run_one_video_global_nerf(video_dir,out_folder='/home/bowen/debug/bundlesdf_scan_coffee_415'):
   set_seed(0)
 
   out_folder += '/'   #!NOTE there has to be a / in the end
@@ -148,7 +148,7 @@ def run_one_video_global_nerf(out_folder='/home/bowen/debug/bundlesdf_scan_coffe
   cfg_nerf_dir = f"{cfg_nerf['datadir']}/config.yml"
   yaml.dump(cfg_nerf, open(cfg_nerf_dir,'w'))
 
-  reader = YcbineoatReader(video_dir=args.video_dir, downscale=1)
+  reader = YcbineoatReader(video_dir=video_dir, downscale=1)
 
   tracker = BundleSdf(cfg_track_dir=cfg_track_dir, cfg_nerf_dir=cfg_nerf_dir, start_nerf_keyframes=5)
   tracker.cfg_nerf = cfg_nerf
@@ -223,10 +223,19 @@ if __name__=="__main__":
   args = parser.parse_args()
 
   if args.mode=='run_video':
-    run_one_video(video_dir=args.video_dir, out_folder=args.out_folder, use_segmenter=args.use_segmenter, use_gui=args.use_gui)
-  elif args.mode=='global_refine':
-    run_one_video_global_nerf(out_folder=args.out_folder)
-  elif args.mode=='draw_pose':
+    run_one_video(
+      video_dir=args.video_dir,
+      out_folder=args.out_folder,
+      use_segmenter=args.use_segmenter,
+      use_gui=args.use_gui,
+      debug_level=args.debug_level,
+    )
+  elif args.mode == "global_refine":
+    run_one_video_global_nerf(
+      video_dir=args.video_dir,
+      out_folder=args.out_folder,
+    )
+  elif args.mode == "draw_pose":
     draw_pose()
   else:
     raise RuntimeError
