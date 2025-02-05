@@ -240,11 +240,12 @@ python -c "import imageio; imageio.plugins.freeimage.download()"
 
 # Build Kaolin
 export FORCE_CUDA=1
-python setup.py develop
+pip install -e .
 
 # Install additional pip packages
 pip install transformations einops scikit-image awscli-plugin-endpoint gputil xatlas pymeshlab rtree dearpygui pytinyrenderer pyqt5 cython-npm chardet openpyxl
 
+cd ".."
 ROOT=$(pwd)
 cd ${INSTALL_PREFIX}/kaolin && pip install -e .
 cd ${ROOT}/mycuda && rm -rf build *egg* && pip install -e .
