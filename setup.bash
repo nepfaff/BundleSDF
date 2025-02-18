@@ -70,6 +70,18 @@ sudo apt-get install -y \
     p7zip-rar \
     software-properties-common
 
+# Check CUDA installation
+if ! command -v nvcc &> /dev/null; then
+    echo "CUDA not found. Please install CUDA toolkit first."
+    exit 1
+fi
+
+# Set CUDA_HOME if not already set
+if [ -z "$CUDA_HOME" ]; then
+    export CUDA_HOME=$(dirname $(dirname $(which nvcc)))
+    echo "Setting CUDA_HOME to $CUDA_HOME"
+fi
+
 # Set up environment variables for local installation
 export PATH=$INSTALL_PREFIX/bin:$PATH
 export LD_LIBRARY_PATH=$INSTALL_PREFIX/lib:$INSTALL_PREFIX/lib64:$LD_LIBRARY_PATH
@@ -84,7 +96,12 @@ source .venv/bin/activate
 # Upgrade pip
 pip install --upgrade pip
 
-pip install scikit-image==0.17.2 networkx==2.2
+pip install wheel setuptools
+pip install numpy==1.26.1
+pip install Cython==0.29.20
+
+pip install --no-build-isolation scikit-image==0.17.2
+pip install networkx==2.2
 
 # Install required Python packages
 pip install wheel setuptools
