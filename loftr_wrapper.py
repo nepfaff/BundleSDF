@@ -12,16 +12,21 @@ code_dir = os.path.dirname(os.path.realpath(__file__))
 import argparse
 import cv2
 import torch,imageio
-from BundleTrack.LoFTR.src.loftr import *
+from BundleTrack.EfficientLoFTR.src.loftr import *
+from BundleTrack.EfficientLoFTR.src.config.default import get_cfg_defaults
 from Utils import *
+from BundleTrack.EfficientLoFTR.src.utils.misc import lower_config
 
 
 class LoftrRunner:
   def __init__(self):
-    default_cfg['match_coarse']['thr'] = 0.2
+    default_cfg = get_cfg_defaults().LOFTR
+    default_cfg.COARSE.NPE = [832, 832, 832, 832]
+    default_cfg.MATCH_COARSE.THR = 0.2
+    default_cfg.EVAL_TIMES = 10 # ransac iterations (more = increased robustness)
     print("default_cfg",default_cfg)
-    self.matcher = LoFTR(config=default_cfg)
-    self.matcher.load_state_dict(torch.load(f'{code_dir}/BundleTrack/LoFTR/weights/outdoor_ds.ckpt')['state_dict'])
+    self.matcher = LoFTR(config=lower_config(default_cfg))
+    self.matcher.load_state_dict(torch.load(f'{code_dir}/BundleTrack/EfficientLoFTR/weights/eloftr_outdoor.ckpt')['state_dict'])
     self.matcher = self.matcher.eval().cuda()
 
 
