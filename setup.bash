@@ -1,13 +1,14 @@
 ## Installation script that was written for Ubuntu 22.04 with CUDA 12.1
 
 #!/bin/bash
-set -e
+set -eo pipefail
 
 # Set timezone
 export TZ=US/Pacific
 
 # Set installation prefix
-INSTALL_PREFIX=$(pwd)/local
+BUNDLESDF_DIR=$(pwd)
+INSTALL_PREFIX=$BUNDLESDF_DIR/local
 rm -rf $INSTALL_PREFIX
 mkdir -p $INSTALL_PREFIX
 
@@ -262,11 +263,9 @@ pip install -e .
 # Install additional pip packages
 pip install transformations einops scikit-image awscli-plugin-endpoint gputil xatlas pymeshlab rtree dearpygui pytinyrenderer pyqt5 cython-npm chardet openpyxl
 
-cd ".."
-ROOT=$(pwd)
-cd ${INSTALL_PREFIX}/kaolin && pip install -e .
-cd ${ROOT}/mycuda && rm -rf build *egg* && pip install -e .
-cd ${ROOT}/BundleTrack && rm -rf build && mkdir build && cd build && cmake .. && make -j$(nproc)
+cd $INSTALL_PREFIX/kaolin && pip install -e .
+cd $BUNDLESDF_DIR/mycuda && rm -rf build *egg* && pip install -e .
+cd $BUNDLESDF_DIR/BundleTrack && rm -rf build && mkdir build && cd build && cmake .. && make -j$(nproc)
 
 # Do later to prevent errors from dependencies.
 pip install --upgrade networkx
